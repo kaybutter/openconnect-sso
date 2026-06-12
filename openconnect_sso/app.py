@@ -224,7 +224,25 @@ def run_openconnect(auth_info, host, proxy, version, args):
 
     session_token = auth_info.session_token.encode("utf-8")
     logger.debug("Starting OpenConnect", command_line=command_line)
-    return subprocess.run(command_line, input=session_token).returncode
+    # Don't use subprocess.run() here: on CTRL-C the terminal delivers SIGINT to
+    # the whole foreground process group, so openconnect receives it directly and
+    # tears down the connection (removing routes and DNS via the vpnc-script).
+    # subprocess.run() would SIGKILL the child on KeyboardInterrupt, aborting that
+    # teardown and leaving stale routes/DNS behind. Instead, wait for openconnect
+    # to exit on its own.
+    process = subprocess.Popen(command_line, stdin=subprocess.PIPE)
+    try:
+        process.stdin.write(session_token)
+        process.stdin.close()
+    except BrokenPipeError:
+        pass
+    while True:
+        try:
+            return process.wait()
+        except KeyboardInterrupt:
+            # openconnect is handling the same SIGINT and cleaning up after
+            # itself; wait for it to finish rather than killing it.
+            pass
 
 
 def handle_disconnect(command):
