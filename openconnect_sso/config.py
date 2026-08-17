@@ -53,10 +53,15 @@ class ConfigNode:
     def from_dict(cls, d):
         if d is None:
             return None
-        return cls(**d)
+        # attrs drops the leading underscore of private fields when generating
+        # __init__, so config files written before secrets became transient
+        # still carry unusable "_passwd"/"_totp" keys.
+        return cls(**{k.lstrip("_"): v for k, v in d.items()})
 
     def as_dict(self):
-        return attr.asdict(self)
+        # attr.asdict recurses on its own and never calls a nested node's
+        # as_dict(), so the transient filter has to be applied from the top.
+        return attr.asdict(self, filter=lambda a, _: not a.metadata.get("transient"))
 
 
 @attr.s
@@ -106,8 +111,10 @@ def get_default_auto_fill_rules():
 @attr.s
 class Credentials(ConfigNode):
     username = attr.ib()
-    _passwd = attr.ib(default=None)
-    _totp = attr.ib(default=None)
+    # Secrets live in the keyring; persisting them to config.toml would put them
+    # on disk in plaintext, and a --totp code is a stale one-time value anyway.
+    _passwd = attr.ib(default=None, metadata={"transient": True})
+    _totp = attr.ib(default=None, metadata={"transient": True})
 
     @property
     def password(self):
