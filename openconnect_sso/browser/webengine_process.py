@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 import multiprocessing
 import signal
 import sys
@@ -54,6 +55,10 @@ class Process(multiprocessing.Process):
         self._states = multiprocessing.Queue()
         self.proxy = proxy
         self.display_mode = display_mode
+        # Read here, in the parent: this process is spawned rather than forked,
+        # so the child inherits no logging config and structlog would otherwise
+        # fall back to its unfiltered default.
+        self.log_level = logging.getLogger().getEffectiveLevel()
 
     def authenticate_at(self, url, credentials):
         self._commands.put(StartupInfo(url, credentials))
@@ -71,6 +76,10 @@ class Process(multiprocessing.Process):
         # To work around funky GC conflicts with C++ code by ensuring QApplication terminates last
         global app
         global profile
+
+        structlog.configure(
+            wrapper_class=structlog.make_filtering_bound_logger(self.log_level)
+        )
 
         signal.signal(signal.SIGTERM, on_sigterm)
         signal.signal(signal.SIGINT, signal.SIG_DFL)
